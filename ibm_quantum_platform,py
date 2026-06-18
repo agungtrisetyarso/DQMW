@@ -1,0 +1,55 @@
+from qiskit import QuantumCircuit, ClassicalRegister
+from qiskit.circuit import Parameter
+from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2 as Sampler
+from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+import numpy as np
+
+service = QiskitRuntimeService(channel="ibm_quantum_platform")
+backend = service.backend("ibm_kingston")
+
+print(f"Using backend: {backend.name} (Optimized Parameters)")
+
+# ====================== CREATE CIRCUIT ======================
+params = [Parameter(f'θ{i}') for i in range(6)]
+
+qc = QuantumCircuit(2)
+cr = ClassicalRegister(2, 'c')
+qc.add_register(cr)
+
+# Layer 1
+qc.ry(params[0], 0)
+qc.ry(params[1], 1)
+qc.rz(params[2], 0)
+qc.rz(params[3], 1)
+qc.cx(0, 1)
+
+# Layer 2
+qc.ry(params[4], 0)
+qc.ry(params[5], 1)
+
+# Engineered Dissipation
+qc.measure([0, 1], [0, 1])
+
+with qc.if_test((cr[0], 1)):
+    qc.x(0)
+
+with qc.if_test((cr[1], 1)):
+    qc.x(1)
+
+qc.measure([0, 1], [0, 1])
+
+# ====================== TRANSPILE ======================
+pm = generate_preset_pass_manager(backend=backend, optimization_level=1)
+isa_circuit = pm.run(qc)
+
+# ====================== USE OPTIMIZED PARAMETERS ======================
+optimal_params = [1.365, 5.4423, 3.7769, 4.449, 0.1293, 6.0941]
+
+print(f"\nUsing optimized parameters: {np.round(optimal_params, 4)}")
+
+# ====================== RUN ON REAL HARDWARE ======================
+sampler = Sampler(backend)
+job = sampler.run([(isa_circuit, optimal_params)], shots=2048)
+
+print(f"\n✅ Job submitted with optimized parameters!")
+print(f"Job ID: {job.job_id()}")
